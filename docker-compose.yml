@@ -1,0 +1,152 @@
+services:
+  mysql-ticketing-users:
+    image: mysql:latest
+    container_name: mysql-ticketing-users
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DATABASE_ROOT_PASSWORD_USERS_SERVICE}
+      MYSQL_DATABASE: ${DATABASE_NAME_USERS_SERVICE}
+      MYSQL_USER: ${DATABASE_USER_USERS_SERVICE}
+      MYSQL_PASSWORD: ${DATABASE_PASSWORD_USERS_SERVICE}
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql-ticketing-users-data:/var/lib/mysql
+    networks:
+      - ticketing-network
+
+  mysql-ticketing-auth:
+    image: mysql:latest
+    container_name: mysql-ticketing-auth
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DATABASE_ROOT_PASSWORD_AUTH_SERVICE}
+      MYSQL_DATABASE: ${DATABASE_NAME_AUTH_SERVICE}
+      MYSQL_USER: ${DATABASE_USER_AUTH_SERVICE}
+      MYSQL_PASSWORD: ${DATABASE_PASSWORD_AUTH_SERVICE}
+    ports:
+      - "3308:3306"
+    volumes:
+      - mysql-ticketing-auth-data:/var/lib/mysql
+    networks:
+      - ticketing-network
+
+  mysql-ticketing-events:
+    image: mysql:latest
+    container_name: mysql-ticketing-events
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DATABASE_ROOT_PASSWORD_EVENTS_SERVICE}
+      MYSQL_DATABASE: ${DATABASE_NAME_EVENTS_SERVICE}
+      MYSQL_USER: ${DATABASE_USER_EVENTS_SERVICE}
+      MYSQL_PASSWORD: ${DATABASE_PASSWORD_EVENTS_SERVICE}
+    ports:
+      - "3309:3306"
+    volumes:
+      - mysql-ticketing-events-data:/var/lib/mysql
+    networks:
+      - ticketing-network
+
+  mysql-ticketing-bookings:
+    image: mysql:latest
+    container_name: mysql-ticketing-bookings
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DATABASE_ROOT_PASSWORD_BOOKINGS_SERVICE}
+      MYSQL_DATABASE: ${DATABASE_NAME_BOOKINGS_SERVICE}
+      MYSQL_USER: ${DATABASE_USER_BOOKINGS_SERVICE}
+      MYSQL_PASSWORD: ${DATABASE_PASSWORD_BOOKINGS_SERVICE}
+    ports:
+      - "3310:3306"
+    volumes:
+      - mysql-ticketing-bookings-data:/var/lib/mysql
+    networks:
+      - ticketing-network
+
+  users-service:
+    build: ./users-service
+    container_name: users-service
+    restart: always
+    depends_on:
+      - mysql-ticketing-users
+    environment:
+      DATABASE_URL: "${DATABASE_URL_USERS_SERVICE}"
+      JWT_SECRET: "${JWT_SECRET}"
+    ports:
+      - "5001:5001"
+    networks:
+      - ticketing-network
+    volumes:
+      - ./users-service:/app
+      - ./.env:/env/.env
+
+  auth-service:
+    build: ./auth-service
+    container_name: auth-service
+    restart: always
+    depends_on:
+      - mysql-ticketing-auth
+    environment:
+      DATABASE_URL: "${DATABASE_URL_AUTH_SERVICE}"
+      JWT_SECRET: "${JWT_SECRET}"
+    ports:
+      - "5002:5002"
+    networks:
+      - ticketing-network
+    volumes:
+      - ./auth-service:/app
+      - ./.env:/env/.env
+
+  events-service:
+    build: ./events-service
+    container_name: events-service
+    restart: always
+    depends_on:
+      - mysql-ticketing-events
+    environment:
+      DATABASE_URL: "${DATABASE_URL_EVENTS_SERVICE}"
+      JWT_SECRET: "${JWT_SECRET}"
+    ports:
+      - "5003:5003"
+    networks:
+      - ticketing-network
+    volumes:
+      - ./events-service:/app
+      - ./env:/env/.env
+
+  bookings-service:
+    build: ./bookings-service
+    container_name: bookings-service
+    restart: always
+    depends_on:
+      - mysql-ticketing-bookings
+    environment:
+      DATABASE_URL: "${DATABASE_URL_BOOKINGS_SERVICE}"
+      JWT_SECRET: "${JWT_SECRET}"
+    ports:
+      - "5004:5004"
+    networks:
+      - ticketing-network
+    volumes:
+      - ./bookings-service:/app
+      - ./env:/env/.env
+
+  nats:
+    image: nats:latest
+    container_name: nats
+    ports:
+      - "4222:4222" # client port
+      - "8222:8222" # monitoring (HTTP)
+    command: "-js" # JetStream
+    networks:
+      - ticketing-network
+
+volumes:
+  mysql-ticketing-users-data:
+  mysql-ticketing-auth-data:
+  mysql-ticketing-events-data:
+  mysql-ticketing-bookings-data:
+
+networks:
+  ticketing-network:
+    driver: bridge
