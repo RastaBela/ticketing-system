@@ -69,9 +69,11 @@ services:
     restart: always
     depends_on:
       - mysql-ticketing-users
+      - nats
     environment:
       DATABASE_URL: "${DATABASE_URL_USERS_SERVICE}"
       JWT_SECRET: "${JWT_SECRET}"
+      NATS_URL: nats://nats:4222
     ports:
       - "5001:5001"
     networks:
@@ -86,9 +88,11 @@ services:
     restart: always
     depends_on:
       - mysql-ticketing-auth
+      - nats
     environment:
       DATABASE_URL: "${DATABASE_URL_AUTH_SERVICE}"
       JWT_SECRET: "${JWT_SECRET}"
+      NATS_URL: nats://nats:4222
     ports:
       - "5002:5002"
     networks:
@@ -103,9 +107,11 @@ services:
     restart: always
     depends_on:
       - mysql-ticketing-events
+      - nats
     environment:
       DATABASE_URL: "${DATABASE_URL_EVENTS_SERVICE}"
       JWT_SECRET: "${JWT_SECRET}"
+      NATS_URL: nats://nats:4222
     ports:
       - "5003:5003"
     networks:
@@ -120,15 +126,52 @@ services:
     restart: always
     depends_on:
       - mysql-ticketing-bookings
+      - nats
     environment:
       DATABASE_URL: "${DATABASE_URL_BOOKINGS_SERVICE}"
       JWT_SECRET: "${JWT_SECRET}"
+      NATS_URL: nats://nats:4222
     ports:
       - "5004:5004"
     networks:
       - ticketing-network
     volumes:
       - ./bookings-service:/app
+      - ./env:/env/.env
+
+  payments-service:
+    build: ./payments-service
+    container_name: payments-service
+    restart: always
+    depends_on:
+      - nats
+    environment:
+      JWT_SECRET: "${JWT_SECRET}"
+      NATS_URL: nats://nats:4222
+    ports:
+      - "5005:5005"
+    networks:
+      - ticketing-network
+    volumes:
+      - ./payments-service:/app
+      - ./env:/env/.env
+
+  notifications-service:
+    build: ./notifications-service
+    container_name: notifications-service
+    restart: always
+    depends_on:
+      - nats
+      - maildev
+    environment:
+      JWT_SECRET: "${JWT_SECRET}"
+      NATS_URL: nats://nats:4222
+      SMTP_HOST: maildev
+      SMTP_PORT: 1025
+    networks:
+      - ticketing-network
+    volumes:
+      - ./notifications-service:/app
       - ./env:/env/.env
 
   nats:
@@ -138,6 +181,32 @@ services:
       - "4222:4222" # client port
       - "8222:8222" # monitoring (HTTP)
     command: "-js" # JetStream
+    networks:
+      - ticketing-network
+
+  maildev:
+    image: maildev/maildev
+    container_name: maildev
+    ports:
+      - "1080:1080" # Web
+      - "1025:1025" # SMTP
+    networks:
+      - ticketing-network
+
+  nginx:
+    image: nginx:latest
+    container_name: nginx-load-balancer
+    restart: always
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+    depends_on:
+      - users-service
+      - auth-service
+      - events-service
+      - bookings-service
+      - payments-service
     networks:
       - ticketing-network
 

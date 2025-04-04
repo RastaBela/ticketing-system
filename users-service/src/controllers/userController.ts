@@ -1,10 +1,9 @@
 import { Request, Response } from "express";
-import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { AuthenticatedRequest } from "../middlewares/authMiddleware";
 import { getNatsConnection, stringCodec } from "../events/natsClient";
 
-const prisma = new PrismaClient();
+import prisma from "../lib/prisma";
 
 /**
  * @description Register a new user
@@ -38,6 +37,7 @@ export const registerUser = async (
 
     res.status(201).json({ message: "User registered successfully", user });
   } catch (error) {
+    console.log("🔥 ERROR in registerUser:", error); // 👈
     res.status(500).json({ message: "Error while registering the user" });
   }
 };
@@ -162,7 +162,6 @@ export const getUsers = async (
  */
 export const getUserById = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    // TODO: Un user doit pouvoir voir ses infos mais ne doit pas pouvoir voir celles d'un autre user
     if (!req.user || req.user.role !== "ADMIN") {
       if (req.user.id !== req.params.id) {
         res.status(403).json({ message: "Forbidden action: admin only." });

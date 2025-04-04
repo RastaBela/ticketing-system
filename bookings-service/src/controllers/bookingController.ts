@@ -1,9 +1,8 @@
-import { Response } from "express";
-import { PrismaClient } from "@prisma/client";
+import { Response, Request } from "express";
 import { AuthenticatedRequest } from "../middlewares/authMiddleware";
 import { getNatsConnection, stringCodec } from "../events/natsClient";
 
-const prisma = new PrismaClient();
+import prisma from "../lib/prisma";
 
 /**
  * @description Create a booking
@@ -14,77 +13,101 @@ export const createBooking = async (
   req: AuthenticatedRequest,
   res: Response
 ): Promise<void> => {
-  try {
-    if (!req.user) {
-      res
-        .status(401)
-        .json({ message: "Unauthorized: user is not authentified" });
-      return;
-    }
+  const { eventId, quantity } = req.body;
+  const userId = req.user?.id;
 
-    const { userId, eventId, quantity, totalPrice, status, createdAt } =
-      req.body;
-
-    const booking = await prisma.booking.create({
-      data: {
-        userId,
-        eventId,
-        quantity,
-        totalPrice,
-        status,
-        createdAt: new Date(createdAt),
-      },
-    });
-
-    res.status(201).json({ message: "Booking successfully created", booking });
-  } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Error while creating the booking", error });
+  if (!userId) {
+    res.status(403).json({ message: "Unauthorized" });
+    return;
   }
+
+  const event = await prisma.event.findUnique({ where: { id: eventId } });
+  if (!event) {
+    res.status(404).json({ message: "Event not found" });
+    return;
+  }
+
+  if (event.availableTickets < quantity) {
+    res.status(400).json({ message: "Not enough tickets available" });
+    return;
+  }
+
+  const totalPrice = event.price * quantity;
+
+  const booking = await prisma.booking.create({
+    data: {
+      userId: userId,
+      eventId,
+      quantity,
+      totalPrice,
+      status: "PENDING",
+    },
+  });
+
+  const nats = await getNatsConnection();
+  nats.publish(
+    "booking.created",
+    stringCodec.encode(
+      JSON.stringify({
+        id: booking.id,
+        eventId: booking.eventId,
+        quantity: booking.quantity,
+        totalPrice: booking.totalPrice,
+        status: booking.status,
+        userId: booking.userId,
+        email: req.user?.email,
+        title: event.title,
+      })
+    )
+  );
+
+  res.status(201).json(booking);
 };
 
 /**
- * @description Update a booking
- * @route PUT /api/bookings/:id
+ * @description Get the current logged in user's bookings
+ * @route GET /api/bookings/my/bookings
  * @access Users
  */
-export const updateBooking = async (
+export const getBookings = async (
   req: AuthenticatedRequest,
   res: Response
 ): Promise<void> => {
-  try {
-    if (!req.user) {
-      res
-        .status(401)
-        .json({ message: "Unauthorized: user is not authentified" });
-      return;
-    }
-
-    if (req.user.id !== req.params.userId) {
-      res.status(403).json({
-        message: "Unauthorized: a user can only update its own booking",
-      });
-      return;
-    }
-
-    const { quantity, totalPrice, status } = req.body;
-    const id = req.params.id;
-
-    const updatedBooking = await prisma.booking.update({
-      data: { quantity, totalPrice, status },
-      where: { id },
-    });
-
-    res.status(200).json({
-      message: "Booking has been successfully updated",
-      updatedBooking,
-    });
-  } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Error while updating the booking", error });
+  const userId = req.user?.id;
+  if (!userId) {
+    res.status(403).json({ message: "Unauthorized" });
+    return;
   }
+
+  const bookings = await prisma.booking.findMany({
+    where: { userId },
+    include: { event: true },
+    orderBy: { createdAt: "desc" },
+  });
+
+  res.json(bookings);
+};
+
+/**
+ * @description Get a user's booking
+ * @route GET /api/bookings/:id
+ * @access Users
+ */
+export const getBookingById = async (
+  req: AuthenticatedRequest,
+  res: Response
+): Promise<void> => {
+  const { id } = req.params;
+  const userId = req.user?.id;
+
+  const booking = await prisma.booking.findUnique({ where: { id } });
+
+  if (!booking || booking.userId !== userId) {
+    res.status(404).json({ message: "Booking not found" });
+    return;
+  }
+
+  res.json(booking);
 };
 
 /**
@@ -92,161 +115,89 @@ export const updateBooking = async (
  * @route GET /api/bookings/
  * @access Admin
  */
-export const getBookings = async (
+export const getAllBookings = async (
   req: AuthenticatedRequest,
   res: Response
 ): Promise<void> => {
-  try {
-    if (!req.user) {
-      res
-        .status(401)
-        .json({ message: "Unauthorized: user is not authentified" });
-      return;
-    }
-
-    if (req.user.role !== "ADMIN") {
-      res
-        .status(403)
-        .json({ message: "Forbidden: only admin can perform this action" });
-      return;
-    }
-
-    const bookings = prisma.booking.findMany();
-    res.status(200).json(bookings);
-  } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Error while getting the bookings", error });
+  if (req.user?.role !== "ADMIN") {
+    res.status(403).json({ message: "Only admins can access all bookings" });
+    return;
   }
+
+  const bookings = await prisma.booking.findMany({
+    include: { event: true },
+    orderBy: { createdAt: "desc" },
+  });
+
+  res.json(bookings);
 };
 
 /**
- * @description Get own bookings
- * @route GET /api/bookings/my/bookings
- * @access Self
+ * @description Update a booking
+ * @route PUT /api/bookings/:id
+ * @access Self and Admin
  */
-export const getOwnBookings = async (
+export const updateBooking = async (
   req: AuthenticatedRequest,
   res: Response
 ): Promise<void> => {
-  try {
-    if (!req.user) {
-      res
-        .status(401)
-        .json({ message: "Unauthorized: user is not authentified" });
-      return;
-    }
+  const { id } = req.params;
+  const { quantity, status } = req.body;
+  const userId = req.user?.id;
+  const userRole = req.user?.role;
 
-    const userId = req.params.userId;
-    const bookings = prisma.booking.findMany({ where: { userId } });
+  const booking = await prisma.booking.findUnique({ where: { id } });
 
-    res.status(200).json(bookings);
-  } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Error while getting the bookings", error });
+  if (!booking) {
+    res.status(404).json({ message: "Booking not found" });
+    return;
   }
-};
 
-/**
- * @description Get user's bookings
- * @route GET /api/bookings/user/:id
- * @access Admin
- */
-export const getBookingsByUserId = async (
-  req: AuthenticatedRequest,
-  res: Response
-): Promise<void> => {
-  try {
-    if (!req.user || req.user.role !== "ADMIN") {
-      res
-        .status(403)
-        .json({ message: "Forbidden: only admin can perform this action" });
-      return;
-    }
+  const isOwner = booking.userId === userId;
+  const isAdmin = userRole === "ADMIN";
 
-    const userId = req.params.id;
-    const bookings = await prisma.booking.findMany({
-      where: { userId: userId },
-    });
-
-    res.status(200).json(bookings);
-  } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Error while getting user's bookings", error });
+  if (!isOwner && !isAdmin) {
+    res.status(403).json({ message: "Unauthorized to update this booking" });
+    return;
   }
+
+  const updated = await prisma.booking.update({
+    where: { id },
+    data: { quantity, status },
+  });
+
+  res.json(updated);
 };
 
 /**
  * @description Delete a booking
  * @route DELETE /api/bookings/:id
- * @access Admin
+ * @access Self and Admin
  */
 export const deleteBooking = async (
   req: AuthenticatedRequest,
   res: Response
 ): Promise<void> => {
-  try {
-    if (!req.user) {
-      res
-        .status(401)
-        .json({ message: "Unauthorized: user is not authentified" });
-      return;
-    }
+  const { id } = req.params;
+  const userId = req.user?.id;
+  const userRole = req.user?.role;
 
-    if (req.user.role !== "ADMIN") {
-      res
-        .status(403)
-        .json({ message: "Forbidden: only admin can perform this action" });
-      return;
-    }
+  const booking = await prisma.booking.findUnique({ where: { id } });
 
-    const id = req.params.id;
-    await prisma.booking.delete({ where: { id } });
-    res.json({ message: "The booking has been successfully deleted" });
-  } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Error while deleting the booking", error });
+  if (!booking) {
+    res.status(404).json({ message: "Booking not found" });
+    return;
   }
-};
 
-/**
- * @description Delete own booking
- * @route DELETE /api/bookings/my/booking/:id
- * @access Self
- */
-export const deleteOwnBooking = async (
-  req: AuthenticatedRequest,
-  res: Response
-): Promise<void> => {
-  try {
-    if (!req.user) {
-      res
-        .status(401)
-        .json({ message: "Unauthorized: user is not authentified" });
-      return;
-    }
+  const isOwner = booking.userId === userId;
+  const isAdmin = userRole === "ADMIN";
 
-    const id = req.params.id;
-    const userId = req.user.id;
-
-    const bookingToBeDeleted = await prisma.booking.findFirst({
-      where: { id, userId },
-    });
-
-    if (!bookingToBeDeleted) {
-      res.status(404).json({ message: "This booking doesn't exist" });
-      return;
-    }
-
-    await prisma.booking.delete({ where: { id } });
-
-    res.json({ message: "The booking has been successfully deleted" });
-  } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Error while deleting the booking", error });
+  if (!isOwner && !isAdmin) {
+    res.status(403).json({ message: "Unauthorized to delete this booking" });
+    return;
   }
+
+  await prisma.booking.delete({ where: { id } });
+
+  res.status(204).send();
 };

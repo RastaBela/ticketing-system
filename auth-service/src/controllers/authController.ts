@@ -1,9 +1,8 @@
 import { Request, Response } from "express";
-import { PrismaClient } from "@prisma/client";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 
-const prisma = new PrismaClient();
+import prisma from "../lib/prisma";
 
 /**
  * @description Generate a JWT token for the user logging in the system

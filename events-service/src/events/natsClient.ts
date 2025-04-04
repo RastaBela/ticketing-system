@@ -5,7 +5,7 @@ let natsConnection: NatsConnection | null = null;
 export const getNatsConnection = async (): Promise<NatsConnection> => {
   if (!natsConnection) {
     natsConnection = await connect({ servers: "nats://nats:4222" });
-    console.log("✅ Connected to NATS");
+    console.log("✅ Events service is connected to NATS");
   }
   return natsConnection;
 };

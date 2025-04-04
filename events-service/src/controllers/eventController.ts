@@ -1,9 +1,8 @@
 import { Request, Response } from "express";
-import { PrismaClient } from "@prisma/client";
 import { getNatsConnection, stringCodec } from "../events/natsClient";
 import { AuthenticatedRequest } from "../middlewares/authMiddleware";
 
-const prisma = new PrismaClient();
+import prisma from "../lib/prisma";
 
 /**
  * @description Create a new event
@@ -28,7 +27,7 @@ export const createEvent = async (
       price,
       date: new Date(date),
       availableTickets,
-      organizerId: req.user.userId,
+      organizerId: req.user.id,
     },
   });
 
@@ -85,10 +84,7 @@ export const updateEvent = async (
     return;
   }
 
-  if (
-    req.user?.role !== "ORGANIZER" ||
-    req.user.userId !== existing.organizerId
-  ) {
+  if (req.user?.role !== "ORGANIZER" || req.user.id !== existing.organizerId) {
     res.status(403).json({ message: "Unauthorized" });
     return;
   }
@@ -118,10 +114,7 @@ export const deleteEvent = async (
     return;
   }
 
-  if (
-    req.user?.role !== "ORGANIZER" ||
-    req.user.userId !== existing.organizerId
-  ) {
+  if (req.user?.role !== "ORGANIZER" || req.user.id !== existing.organizerId) {
     res.status(403).json({ message: "Unauthorized" });
     return;
   }

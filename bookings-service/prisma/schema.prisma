@@ -21,10 +21,23 @@ model Booking {
   totalPrice Float
   status     BookingStatus @default(PENDING)
   createdAt  DateTime      @default(now())
+  event      Event         @relation(fields: [eventId], references: [id])
 }
 
 enum BookingStatus {
   PENDING
   CONFIRMED
   CANCELLED
+}
+
+model Event {
+  id               String    @id
+  title            String
+  description      String
+  price            Float
+  date             DateTime
+  availableTickets Int
+  organizerId      String
+  createdAt        DateTime
+  Booking          Booking[]
 }
